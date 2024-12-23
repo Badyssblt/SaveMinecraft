@@ -8,18 +8,37 @@ import platform
 import shutil
 import json
 import sys
+import argparse
+
+
+parser = argparse.ArgumentParser(description="Minecraft backup and sync script.")
+parser.add_argument('-type', choices=['vanilla', 'curseforge'], default='vanilla',
+                    help="Type of Minecraft launcher (vanilla or curseforge). Default is vanilla.")
+args = parser.parse_args()
 
 # Détection du système d'exploitation
 if platform.system() == 'Windows':
-    CONFIG = {
-        "MINECRAFT_SAVES_PATH": os.path.join(os.getenv("APPDATA"), ".minecraft", "saves"),
-        "MINECRAFT_LAUNCHER_PATH": r"C:\\Program Files (x86)\\Minecraft Launcher\\MinecraftLauncher.exe",
-    }
+    if args.type == 'vanilla':
+        CONFIG = {
+            "MINECRAFT_SAVES_PATH": os.path.join(os.getenv("APPDATA"), ".minecraft", "saves"),
+            "MINECRAFT_LAUNCHER_PATH": r"C:\\Program Files (x86)\\Minecraft Launcher\\MinecraftLauncher.exe",
+        }
+    elif args.type == 'curseforge':
+        CONFIG = {
+            "MINECRAFT_SAVES_PATH": os.path.join(os.getenv("APPDATA"), "CurseForge", "minecraft", "Instances"),
+            "MINECRAFT_LAUNCHER_PATH": r"C:\\Program Files (x86)\\Overwolf\\OverwolfLauncher.exe",
+        }
 elif platform.system() == 'Linux':
-    CONFIG = {
-        "MINECRAFT_SAVES_PATH": os.path.expanduser("~/.minecraft/saves"),
-        "MINECRAFT_LAUNCHER_PATH": "/usr/bin/minecraft-launcher",
-    }
+    if args.type == 'vanilla':
+        CONFIG = {
+            "MINECRAFT_SAVES_PATH": os.path.expanduser("~/.minecraft/saves"),
+            "MINECRAFT_LAUNCHER_PATH": "/usr/bin/minecraft-launcher",
+        }
+    elif args.type == 'curseforge':
+        CONFIG = {
+            "MINECRAFT_SAVES_PATH": os.path.expanduser("~/Documents/curseforge/minecraft/Instances"),
+            "MINECRAFT_LAUNCHER_PATH": "/usr/bin/overwolf",
+        }
 else:
     print("Erreur : système d'exploitation non supporté.")
     exit(1)
@@ -46,19 +65,141 @@ def authenticate_drive():
 def sync_to_cloud():
     """Sauvegarde des mondes locaux vers le cloud."""
     global drive
+
     root_folder_id = create_or_get_folder(drive, CLOUD_SYNC_PATH)
-    clear_folder(root_folder_id)
+    # Création des dossiers Vanilla et Modded sur Google Drive
+    vanilla_folder_id = create_or_get_folder(drive, 'Vanilla', root_folder_id)
+    modded_folder_id = create_or_get_folder(drive, 'Modded', root_folder_id)
+    clear_folder(vanilla_folder_id)
+    clear_folder(modded_folder_id)
 
-    for world_name in os.listdir(CONFIG["MINECRAFT_SAVES_PATH"]):
-        world_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], world_name)
-        if os.path.isdir(world_path):
-            zip_file_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], f"{world_name}.zip")
-            shutil.make_archive(zip_file_path.replace('.zip', ''), 'zip', world_path)
+    # Si nous sommes en mode CurseForge, parcourir les instances (modded)
+    if args.type == 'curseforge':
+        for instance_name in os.listdir(CONFIG["MINECRAFT_SAVES_PATH"]):
+            instance_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], instance_name)
+            saves_path = os.path.join(instance_path, 'saves')  # Le chemin vers le dossier saves de chaque modpack
 
-            world_folder_id = create_or_get_folder(drive, world_name, parent_id=root_folder_id)
-            upload_file(drive, zip_file_path, root_folder_id, f"{world_name}.zip")
-            os.remove(zip_file_path)
+            if os.path.isdir(saves_path):
+                modpack_folder_id = create_or_get_folder(drive, instance_name, parent_id=modded_folder_id)
 
+                for world_name in os.listdir(saves_path):
+                    world_path = os.path.join(saves_path, world_name)
+                    if os.path.isdir(world_path):
+                        zip_file_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], f"{instance_name}_{world_name}.zip")
+                        shutil.make_archive(zip_file_path.replace('.zip', ''), 'zip', world_path)
+
+                        # Télécharger les mondes compressés dans le dossier du modpack
+                        upload_file(drive, zip_file_path, modpack_folder_id, f"{world_name}.zip")
+                        os.remove(zip_file_path)
+
+    else:  # Vanilla
+        for world_name in os.listdir(CONFIG["MINECRAFT_SAVES_PATH"]):
+            world_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], world_name)
+            if os.path.isdir(world_path):
+                zip_file_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], f"{world_name}.zip")
+                shutil.make_archive(zip_file_path.replace('.zip', ''), 'zip', world_path)
+
+                # Télécharger les mondes Vanilla dans le dossier Vanilla
+                upload_file(drive, zip_file_path, vanilla_folder_id, f"{world_name}.zip")
+                os.remove(zip_file_path)
+
+
+def sync_and_restore_from_cloud():
+    """Télécharge et restaure les mondes Minecraft depuis Google Drive, avec des vérifications de sécurité."""
+    global drive
+    backup_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], "../backupsSave")
+    backup_path = os.path.abspath(backup_path)  # Résolution du chemin absolu
+    os.makedirs(backup_path, exist_ok=True)
+
+    # Vider backupsSave
+    for root, dirs, files in os.walk(backup_path, topdown=False):
+        for file in files:
+            file_path = os.path.join(root, file)
+            os.remove(file_path)
+        for dir in dirs:
+            dir_path = os.path.join(root, dir)
+            os.rmdir(dir_path)
+
+    # Déplacer les mondes existants vers backupsSave
+    if args.type == 'vanilla':
+        vanilla_saves = os.listdir(CONFIG["MINECRAFT_SAVES_PATH"])
+        if not vanilla_saves:
+            print("Aucun monde Vanilla local à sauvegarder.")
+        else:
+            for world_name in vanilla_saves:
+                world_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], world_name)
+                backup_world_path = os.path.join(backup_path, world_name)
+
+                if os.path.isdir(world_path):
+                    shutil.move(world_path, backup_world_path)
+
+    elif args.type == 'curseforge':
+        modpacks = os.listdir(CONFIG["MINECRAFT_SAVES_PATH"])
+        if not modpacks:
+            print("Aucun modpack CurseForge local trouvé.")
+        else:
+            for modpack_name in modpacks:
+                modpack_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], modpack_name)
+                saves_path = os.path.join(modpack_path, "saves")
+                if os.path.isdir(saves_path):
+                    modpack_saves = os.listdir(saves_path)
+                    if not modpack_saves:
+                        print(f"Aucune sauvegarde trouvée dans le modpack {modpack_name}.")
+                    else:
+                        backup_modpack_path = os.path.join(backup_path, modpack_name, "saves")
+                        os.makedirs(backup_modpack_path, exist_ok=True)
+
+                        for save_name in modpack_saves:
+                            save_path = os.path.join(saves_path, save_name)
+                            backup_save_path = os.path.join(backup_modpack_path, save_name)
+
+                            shutil.move(save_path, backup_save_path)
+
+    root_folder_id = create_or_get_folder(drive, CLOUD_SYNC_PATH)
+
+    vanilla_folder_id = create_or_get_folder(drive, 'Vanilla', parent_id=root_folder_id)
+    modded_folder_id = create_or_get_folder(drive, 'Modded', parent_id=root_folder_id)
+
+    # Restaurer les mondes Vanilla
+    if args.type == 'vanilla':
+        cloud_vanilla_files = drive.ListFile({'q': f"'{vanilla_folder_id}' in parents"}).GetList()
+        if not cloud_vanilla_files:
+            print("Aucune sauvegarde Vanilla trouvée sur le cloud.")
+        else:
+            for file in cloud_vanilla_files:
+                if file['title'].endswith('.zip'):
+                    local_zip_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], file['title'])
+                    file.GetContentFile(local_zip_path)
+
+                    extracted_folder_path = local_zip_path.replace('.zip', '')
+                    shutil.unpack_archive(local_zip_path, extracted_folder_path)
+
+                    os.remove(local_zip_path)
+
+    # Restaurer les mondes moddés (CurseForge)
+    elif args.type == 'curseforge':
+        cloud_modpacks = drive.ListFile({'q': f"'{modded_folder_id}' in parents"}).GetList()
+        if not cloud_modpacks:
+            print("Aucun modpack trouvé sur le cloud.")
+        else:
+            for modpack_folder in cloud_modpacks:
+                modpack_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], modpack_folder['title'])
+                saves_path = os.path.join(modpack_path, 'saves')
+                os.makedirs(saves_path, exist_ok=True)
+
+                cloud_saves = drive.ListFile({'q': f"'{modpack_folder['id']}' in parents"}).GetList()
+                if not cloud_saves:
+                    print(f"Aucune sauvegarde trouvée pour le modpack {modpack_folder['title']} sur le cloud.")
+                else:
+                    for file in cloud_saves:
+                        if file['title'].endswith('.zip'):
+                            local_zip_path = os.path.join(saves_path, file['title'])
+                            file.GetContentFile(local_zip_path)
+
+                            extracted_folder_path = local_zip_path.replace('.zip', '')
+                            shutil.unpack_archive(local_zip_path, extracted_folder_path)
+
+                            os.remove(local_zip_path)
 
 def clear_folder(folder_id):
     global drive
@@ -72,83 +213,6 @@ def clear_folder(folder_id):
             file.Delete()
         except Exception as e:
             print(f"Erreur lors de la suppression de {file['title']} : {e}")
-
-
-
-def sync_and_restore_from_cloud():
-    """Télécharge et restaure les mondes Minecraft depuis Google Drive."""
-
-
-    if os.listdir(CONFIG["MINECRAFT_SAVES_PATH"]) == 0:
-        return False
-
-    global drive
-    backup_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], "../backupsSave")
-    backup_path = os.path.abspath(backup_path)  # Résolution du chemin absolu
-    os.makedirs(backup_path, exist_ok=True)
-
-
-
-
-    # Vider backupsSave
-    for root, dirs, files in os.walk(backup_path, topdown=False):
-        for file in files:
-            file_path = os.path.join(root, file)
-            os.remove(file_path)
-        for dir in dirs:
-            dir_path = os.path.join(root, dir)
-            os.rmdir(dir_path)
-
-    # Déplacer les mondes existants vers backupsSave
-    for world_name in os.listdir(CONFIG["MINECRAFT_SAVES_PATH"]):
-        world_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], world_name)
-        backup_world_path = os.path.join(backup_path, world_name)
-
-        if os.path.isdir(world_path):
-            shutil.move(world_path, backup_world_path)
-
-    root_folder_id = create_or_get_folder(drive, CLOUD_SYNC_PATH)
-
-    for file in drive.ListFile({'q': f"'{root_folder_id}' in parents"}).GetList():
-        if file['title'].endswith('.zip'):
-            local_zip_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], file['title'])
-            file.GetContentFile(local_zip_path)
-
-            extracted_folder_path = local_zip_path.replace('.zip', '')
-            shutil.unpack_archive(local_zip_path, extracted_folder_path)
-
-            os.remove(local_zip_path)
-
-
-
-
-
-
-
-def sync_from_cloud():
-    """Téléchargement des mondes depuis le cloud après suppression du contenu local."""
-    global drive
-    
-    # Supprimer tout le contenu du dossier des sauvegardes
-    for root, dirs, files in os.walk(CONFIG["MINECRAFT_SAVES_PATH"], topdown=False):
-        for file in files:
-            file_path = os.path.join(root, file)
-            os.remove(file_path)
-        for dir in dirs:
-            dir_path = os.path.join(root, dir)
-            os.rmdir(dir_path)
-
-    root_folder_id = create_or_get_folder(drive, CLOUD_SYNC_PATH)
-
-    for world_folder in drive.ListFile({'q': f"'{root_folder_id}' in parents"}).GetList():
-        local_world_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], world_folder['title'])
-        os.makedirs(local_world_path, exist_ok=True)
-
-        for file in drive.ListFile({'q': f"'{world_folder['id']}' in parents"}).GetList():
-            local_file_path = os.path.join(local_world_path, file['title'])
-            os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
-            file.GetContentFile(local_file_path)
-            print(f"Téléchargé : {file['title']} dans {world_folder['title']}")
 
 
 
@@ -221,6 +285,7 @@ if __name__ == "__main__":
     log_status("minecraft", "Minecraft fermé, Upload des mondes sur le cloud...")
 
     sync_to_cloud()
+
 
     log_status("minecraft", 'Upload des mondes terminée')
 
