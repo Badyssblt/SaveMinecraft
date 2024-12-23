@@ -70,9 +70,20 @@ def sync_to_cloud():
     # Création des dossiers Vanilla et Modded sur Google Drive
     vanilla_folder_id = create_or_get_folder(drive, 'Vanilla', root_folder_id)
     modded_folder_id = create_or_get_folder(drive, 'Modded', root_folder_id)
-    clear_folder(vanilla_folder_id)
-    clear_folder(modded_folder_id)
 
+    if(args.type == "curseforge"):
+        modded_saves_empty = all(len(os.listdir(os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], instance_name, 'saves'))) == 0 
+                                    for instance_name in os.listdir(CONFIG["MINECRAFT_SAVES_PATH"])
+                                    if os.path.isdir(os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], instance_name)))
+        if not modded_saves_empty:
+            clear_folder(modded_folder_id)
+
+    if(args.type == "vanilla"):
+        vanilla_saves_empty = len(os.listdir(CONFIG["MINECRAFT_SAVES_PATH"])) == 0
+        if not vanilla_saves_empty:
+            clear_folder(vanilla_folder_id)
+
+    
     # Si nous sommes en mode CurseForge, parcourir les instances (modded)
     if args.type == 'curseforge':
         for instance_name in os.listdir(CONFIG["MINECRAFT_SAVES_PATH"]):
@@ -207,6 +218,8 @@ def clear_folder(folder_id):
     query = f"'{folder_id}' in parents and trashed = false"
 
     file_list = drive.ListFile({'q': query}).GetList()
+
+    log_status("delete", "Suppresion des mondes du cloud...")
 
     for file in file_list:
         try:

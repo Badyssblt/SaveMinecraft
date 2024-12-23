@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electron', {
-  runPythonScript: () => ipcRenderer.send('run-python'),
+  runPythonScript: (type) => ipcRenderer.send('run-python', type),
   onPythonOutput: (callback) => ipcRenderer.on('python-output', callback),
 });

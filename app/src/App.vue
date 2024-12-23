@@ -3,10 +3,10 @@ import { onMounted, ref } from "vue";
 import BottomBar from "./components/BottomBar.vue"
 
 const status = ref("");
-const type = ref('');
+const type = ref('curseforge');
 
 const runPython = () => {
-  window.electron.runPythonScript();
+  window.electron.runPythonScript(type.value)
 }
 
 onMounted(() => {
@@ -24,8 +24,8 @@ onMounted(() => {
   <div class="p-4">
     <h2 class="text-xl text-medium mb-6">Cloud Minecraft</h2>
 
-    <form @submit="runPython" class="flex flex-col items-start">
-      <select name="type" id="type">
+    <form @submit.prevent="runPython" class="flex flex-col items-start">
+      <select name="type" id="type" v-model="type">
         <option value="vanilla">Minecraft Vanilla</option>
         <option value="curseforge">Minecraft moddée (Curseforge)</option>
       </select>
