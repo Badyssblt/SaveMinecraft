@@ -9,12 +9,16 @@ import shutil
 import json
 import sys
 import argparse
+import uuid
 
 
 parser = argparse.ArgumentParser(description="Minecraft backup and sync script.")
 parser.add_argument('-type', choices=['vanilla', 'curseforge'], default='vanilla',
                     help="Type of Minecraft launcher (vanilla or curseforge). Default is vanilla.")
 args = parser.parse_args()
+
+MACHINE_ID = str(uuid.getnode())
+MACHINE_ID_FILE = "machine_id.json"
 
 # Détection du système d'exploitation
 if platform.system() == 'Windows':
@@ -55,8 +59,11 @@ def log_status(step, status):
 
 def authenticate_drive():
     global drive
+
+    # ATTENTION ! Décommenter lors du build de l'app
+    # GoogleAuth.DEFAULT_SETTINGS['client_config_file'] = '/home/badyss/Documents/DevWeb/SaveMinecraft/app/build/linux-unpacked/resources/client_secrets.json'
     gauth = GoogleAuth()
-    gauth.settings["host"] = "localhost:9090"
+
     gauth.LocalWebserverAuth()
     drive = GoogleDrive(gauth)
     return drive
@@ -229,6 +236,44 @@ def clear_folder(folder_id):
 
 
 
+def write_machine_id():
+    """Write machine ID to a JSON file in the saves directory."""
+    id_file_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], MACHINE_ID_FILE)
+    with open(id_file_path, 'w') as f:
+        json.dump({"machine_id": MACHINE_ID}, f)
+
+
+def check_machine_id():
+    """Check if the machine ID matches the ID in the saves directory."""
+    id_file_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], MACHINE_ID_FILE)
+    if os.path.exists(id_file_path):
+        with open(id_file_path, 'r') as f:
+            data = json.load(f)
+            return data.get("machine_id") == MACHINE_ID
+    return False
+
+
+
+def upload_machine_id_to_cloud():
+    """Upload the machine ID file to Google Drive."""
+    global drive
+    id_file_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], MACHINE_ID_FILE)
+    root_folder_id = create_or_get_folder(drive, CLOUD_SYNC_PATH)
+    file = drive.CreateFile({'title': MACHINE_ID_FILE, 'parents': [{'id': root_folder_id}]})
+    file.SetContentFile(id_file_path)
+    file.Upload()
+
+
+def download_machine_id_from_cloud():
+    """Download the machine ID file from Google Drive."""
+    global drive
+    root_folder_id = create_or_get_folder(drive, CLOUD_SYNC_PATH)
+    query = f"title='{MACHINE_ID_FILE}' and '{root_folder_id}' in parents and trashed=false"
+    file_list = drive.ListFile({'q': query}).GetList()
+    if file_list:
+        id_file_path = os.path.join(CONFIG["MINECRAFT_SAVES_PATH"], MACHINE_ID_FILE)
+        file_list[0].GetContentFile(id_file_path)
+
 
 def upload_file(drive, local_path, folder_id, relative_path):
     """Téléversement d'un fichier vers Google Drive."""
@@ -283,11 +328,21 @@ if __name__ == "__main__":
     if not os.path.exists(CONFIG["MINECRAFT_SAVES_PATH"]):
         exit(1)
 
+    
     log_status("auth", "Authentification Google Drive...")
     drive = authenticate_drive()
 
-    log_status("auth", 'Authentification réussi, chargement des mondes...')
-    sync_and_restore_from_cloud()
+    log_status("auth", 'Authentification réussi, Vérification de la machine...')
+
+    download_machine_id_from_cloud()
+
+    if check_machine_id():
+        log_status("check", "Pas de changement de machine, les mondes ne se chargeront pas")
+    else:
+        log_status("check", "Changement de machine, Chargement des mondes...")
+        sync_and_restore_from_cloud()
+        write_machine_id()
+        upload_machine_id_to_cloud()
 
     log_status("minecraft", "Chargement des mondes terminés, lancement de Minecraft")
 
@@ -298,7 +353,6 @@ if __name__ == "__main__":
     log_status("minecraft", "Minecraft fermé, Upload des mondes sur le cloud...")
 
     sync_to_cloud()
-
 
     log_status("minecraft", 'Upload des mondes terminée')
 

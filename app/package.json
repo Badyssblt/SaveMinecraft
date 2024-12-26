@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite && electron .",
-    "build": "vite build",
+    "build": "vite build && electron-builder",
     "preview": "vite preview",
     "start": "electron ."
+    
   },
   "main": "main.cjs",
   "dependencies": {
@@ -19,6 +20,51 @@
     "electron": "^33.2.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+  "appId": "com.monapp.example", 
+  "productName": "MonApp", 
+  "directories": {
+    "output": "build" 
+  },
+  "files": [
+    "dist/**/*",
+    "main.cjs", 
+    "preload.cjs",
+    "node_modules/**/*",
+    "../main.py",
+    "env/**/**",
+    "client_secrets.json"
+  ],
+  "extraResources": [
+      {
+        "from": "../main.py",
+        "to": "main.py"
+      },
+      {
+        "from": "../env",
+        "to": "env"
+      },
+      {
+        "from": "../client_secrets.json",
+        "to": "client_secrets.json"
+      }
+    ],
+  "asar": false,
+  "win": {
+    "target": "nsis",
+    "icon": "assets/icon.ico"
+  },
+  "mac": {
+    "target": "dmg",
+    "icon": "assets/icon.icns" 
+  },
+  "linux": {
+    "target": "AppImage",
+    "icon": "assets"
   }
+}
+
 }

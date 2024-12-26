@@ -9,17 +9,6 @@ const scriptPath = path.join(__dirname, '..', 'main.py');
 
 const cwd = path.join(__dirname, '..');
 
-exec(`source ${pythonPath} && python "${scriptPath}"`, (error, stdout, stderr) => {
-  if (error) {
-    console.error(`Erreur d'exécution: ${error.message}`);
-    return;
-  }
-  if (stderr) {
-    console.error(`Erreur: ${stderr}`);
-    return;
-  }
-  console.log(`Sortie: ${stdout}`);
-});
 
 let mainWindow;
 
@@ -33,7 +22,9 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadURL('http://localhost:5173')
+  // mainWindow.loadURL('http://localhost:5173')
+
+  mainWindow.loadFile('dist/index.html');
 
   mainWindow.on('closed', function () {
     mainWindow = null;
